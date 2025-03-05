@@ -1,0 +1,67 @@
+---
+title: |
+  | "PH700A Week 7"
+subtitle: |
+  | Lab Assignment 7
+  | PH 700A, Spring 2025
+author: "FirstName LastName"
+format: html
+editor: source
+---
+
+## Data Import and Package Load
+```{r}
+#| title: data import
+#| include: false
+
+library(data.table)
+library(tidyverse)
+
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+  
+rm(df.triage, df.ed)
+```
+
+## Scenario
+
+Emergency department length of stay (`los`) is traditionally evaluated as an outcome that represents a composite of resource utilization and patient complexity. In an attempt to better prepare our emergency department clinicians, we are interested in identifying predictors of longer length of stay using information provided at the point of triage.
+
+Our question is specifically aimed toward patients that were ADMITTED to the hospital. Therefore, restriction of the data must be performed to  capture `disposition == "ADMITTED"`.
+
+```{r}
+#| label: evaluation of los and transformed los
+df.admitted <- df %>% filter(disposition == "ADMITTED")
+
+hist(as.numeric(df.admitted$los))
+
+df.admitted <- df.admitted %>% mutate(lnlos = log(as.numeric(los)))
+
+hist(df.admitted$lnlos)
+```
+
+Natural log length of stay (`lnlos`) has been generated and should be used as your dependent variable.
+
+## Objective
+
+Using any combination of independent variables provided in the data as well as those that were previously derived from variables in the triage data frame, please develop the best linear regression model to identify factors associated with `lnlos`.
