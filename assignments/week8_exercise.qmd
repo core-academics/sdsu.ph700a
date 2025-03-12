@@ -1,0 +1,135 @@
+---
+title: |
+  | "PH700A Week 8"
+subtitle: |
+  | Lab Assignment 8
+  | PH 700A, Spring 2025
+author: "FirstName LastName"
+format: html
+editor: source
+---
+
+## Data Import and Package Load
+```{r}
+#| title: data import
+#| include: false
+
+library(data.table)
+library(tidyverse)
+
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.vitalsign <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/vitalsign.csv.gz")
+
+df.dx <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/diagnosis.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+
+df <- df %>% mutate(highpain = case_when(
+  pain == "13" ~ 1,
+  pain == "10" ~ 1,
+  pain == "9" ~ 1,
+  pain == "8" ~ 1,
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(pain_noscore = case_when(
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  pain == "" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(hypotensive = if_else(sbp <100, 1, 0))
+
+df <- df %>% mutate(whitebin = if_else(grepl("WHITE", race), 1, 0))  
+  
+df.admitted <- df %>% filter(disposition == "ADMITTED")
+
+hist(as.numeric(df.admitted$los))
+
+df.admitted <- df.admitted %>% mutate(lnlos = log(as.numeric(los)))
+
+idonly <- df.admitted %>% select(stay_id)
+
+df.vitalsign <- left_join(idonly, df.vitalsign, by = "stay_id")
+
+df.dx <- left_join(idonly, df.dx, by = "stay_id")
+
+df.dx <- df.dx %>% mutate(across(icd_title, tolower))
+
+rm(df.triage, df.ed, df, idonly)
+```
+
+## In-hospital Complications
+```{r}
+df.dx$comp <- NA
+
+df.dx <- df.dx %>%
+  mutate(comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("sepsis", icd_title), 1, comp),
+         comp = if_else(grepl("septic", icd_title), 1, comp),
+         comp = if_else(grepl("adv eff medicinal nos", icd_title), 1, comp),
+         comp = if_else(grepl("post-op", icd_title), 1, comp),
+         comp = if_else(grepl("postop", icd_title), 1, comp),
+         comp = if_else(grepl("complication", icd_title), 1, comp),
+         comp = if_else(grepl("misadv", icd_title), 1, comp),
+         comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("following a procedure", icd_title), 1, comp),
+         comp = if_else(grepl("without complications", icd_title), 0, comp)
+  )
+
+comps <- df.dx %>% filter(comp == 1) %>% select(comp, stay_id) %>% distinct(stay_id, comp)
+
+df.admitted <- left_join(df.admitted, comps, by = "stay_id")
+
+rm(comps)
+
+df.admitted <- df.admitted %>% mutate(comp = if_else(is.na(comp), 0, comp))
+```
+
+## Scenario
+
+Incident hospital complications affect quality of care metrics, which may go on to reduce total reimbursement by healthcare payor organizations. To preemptively identify opportunities for improvement, the hospital administration would like for you to identify any potential relationship between patient risk factors and these complications. The data have been modified as follows:
+
+-   All data frames have been restricted to patients with a `stay_id` that had `disposition == "ADMITTED"`
+
+-   Natural log length of stay (`lnlos`) has already been generated
+
+-   Hospital complications (`comp`) were captured using the `icd_title` column from the `df.dx` data frame. This variable is coded as `1` for presence and `0` for absence of complications. This field has already been joined to the `df.admitted` data frame.
+
+## Objective
+
+Using any combination of variables from any of the data frames provided, please develop the "best" logistic regression model to identify factors associated with `comp` among those admitted to the hospital. You are free to use any existing variable or those derived by you as you see fit. 
+
+Please examine the AIC and Hosmer-Lemeshow Goodness-of-Fit statistics to identify your best model.
+
