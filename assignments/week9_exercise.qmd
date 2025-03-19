@@ -1,0 +1,199 @@
+---
+title: |
+  | "PH700A Week 9"
+subtitle: |
+  | Lab Assignment 9
+  | PH 700A, Spring 2025
+author: "FirstName LastName"
+format: html
+editor: source
+---
+
+## Data Import and Package Load
+
+```{r}
+#| title: data initalization
+#| include: false
+
+library(data.table)
+library(tidyverse)
+
+# Primary Data Import from GitHub
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.vitalsign <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/vitalsign.csv.gz")
+
+df.dx <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/diagnosis.csv.gz")
+
+df.meds <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/medrecon.csv.gz")
+
+df.pyxis <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/pyxis.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+
+df <- df %>% mutate(highpain = case_when(
+  pain == "13" ~ 1,
+  pain == "10" ~ 1,
+  pain == "9" ~ 1,
+  pain == "8" ~ 1,
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(pain_noscore = case_when(
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  pain == "" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(hypotensive = if_else(sbp <100, 1, 0))
+
+df <- df %>% mutate(racewhite = if_else(grepl("WHITE", race), 1, 0))  
+  
+df <- df %>% mutate(lnlos = log(as.numeric(los)))
+
+df.dx <- df.dx %>% mutate(across(icd_title, tolower))
+
+rm(df.triage, df.ed)
+
+# Generating a 3-category disposition variable with Home as the base category
+df <- df %>%
+  mutate(disp3cat = case_when(
+    disposition == "HOME" ~ "HOME",
+    disposition == "ADMITTED" ~ "ADMITTED",
+    .default = "OTHER"
+  ))
+
+df <- df %>%
+  mutate(across(c("disp3cat", "racewhite", "arrival_transport", "gender"), as.factor))
+
+df$disp3cat <- relevel(df$disp3cat, ref = "HOME")
+
+## Generating In-hospital Complications Variable
+df.dx$comp <- NA
+
+df.dx <- df.dx %>%
+  mutate(comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("sepsis", icd_title), 1, comp),
+         comp = if_else(grepl("septic", icd_title), 1, comp),
+         comp = if_else(grepl("adv eff medicinal nos", icd_title), 1, comp),
+         comp = if_else(grepl("post-op", icd_title), 1, comp),
+         comp = if_else(grepl("postop", icd_title), 1, comp),
+         comp = if_else(grepl("complication", icd_title), 1, comp),
+         comp = if_else(grepl("misadv", icd_title), 1, comp),
+         comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("following a procedure", icd_title), 1, comp),
+         comp = if_else(grepl("without complications", icd_title), 0, comp)
+  )
+
+comps <- df.dx  %>% filter(comp == 1) %>% distinct(stay_id, comp)
+
+df <- left_join(df, comps, by = "stay_id")
+
+rm(comps)
+
+df <- df %>% mutate(comp = if_else(is.na(comp), 0, comp))
+
+## Capturing Opioid Usage Variable
+df.pyxis <- df.pyxis %>% mutate(across(name, tolower))
+
+df.pyxis <- df.pyxis %>%
+  mutate(opioidtag = case_when(
+    grepl("codeine", name) ~ 1,
+    grepl("fentanyl", name) ~ 1,
+    grepl("duragesic", name) ~ 1,
+    grepl("hydrocodone", name) ~ 1,
+    grepl("vicodin", name) ~ 1,
+    grepl("norco", name) ~ 1,
+    grepl("lortab", name) ~ 1,
+    grepl("hydromorphone", name) ~ 1,
+    grepl("dilaudid", name) ~ 1,
+    grepl("methadone", name) ~ 1,
+    grepl("morphine", name) ~ 1,
+    grepl("oxycodone", name) ~ 1,
+    grepl("oxycontin", name) ~ 1,
+    grepl("roxicodone", name) ~ 1,
+    grepl("oxymorphone", name) ~ 1,
+    grepl("tapentadol", name) ~ 1,
+    grepl("tramadol", name) ~ 1,
+    grepl("ultram", name) ~ 1,
+    grepl("buprenorphine", name) ~ 1,
+    .default = 0
+  ))
+
+opioids <- df.pyxis %>%
+  filter(opioidtag == 1)
+
+# Generating Opioid Usage Ordinal Variable
+opioids <- opioids %>%
+  group_by(stay_id) %>%
+  summarise(opioidsum = sum(opioidtag))
+
+df <- left_join(df, opioids, by = "stay_id")
+df$opioidsum <- ifelse(is.na(df$opioidsum), 0, df$opioidsum)
+
+rm(opioids)
+
+df <- df %>%
+  mutate(opioidlvl = case_when(
+    opioidsum == 0 ~ "None",
+    opioidsum == 1 ~ "Mild",
+    opioidsum == 2 ~ "Moderate",
+    opioidsum >= 3 ~ "Extreme"
+  ))
+df <- df %>%
+  select(-opioidsum) %>%
+  mutate(across(opioidlvl, as.factor))
+
+table(df$opioidlvl)
+df$opioidlvl <- factor(df$opioidlvl, levels = c("None", "Mild", "Moderate", "Extreme"), ordered = TRUE)
+```
+
+## Scenario
+
+The opioid epidemic has driven healthcare institutions to identify factors associated with excessive use among patients presenting in the emergency department. 
+
+Regarding the data:
+
+-   The primary outcome is an ordinal categorical variable `df$opioidlvl`
+
+  -   Values are coded in the following order: None < Mild < Moderate < Extreme
+
+-   Many variables have been pre-generated based on past work (i.e. `racewhite`, `highpain`, `pain_noscore`, `comp`, etc.) and should be found in the `df` dataframe
+
+-   There is no primary risk factor of interest although you can designate one if you so choose
+
+-   It is recommended to not evaluate the `lnlos` variable in your analysis as it was used as the example in-class and showed a violation of the proportional odds assumption
+
+## Objective
+
+Please evaluate the study population for relevant risk factors associated with higher prescription of opioids. You are _not restricted_ to an ordinal logistic regression as the main analytic procedure. Feel free to evaluate a multinomial logistic regression as an option if your analysis suggests it is a better choice.
