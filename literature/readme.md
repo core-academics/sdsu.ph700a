@@ -19,3 +19,7 @@ Amorim LDAF. Cai J. Modelling recurrent events: a tutorial for analysis in epide
 Sommet N, Morselli D. Keep Calm and Learn Multilevel Logistic Modeling: A Simplified Three-Step Procedure Using Stata, R, Mplus, and SPSS. *Int Rev Social Psychology*. 2017;30(1):203-218. DOI: <https://doi.org/10.5334/irsp.90>
 
 &nbsp; &nbsp; Filename: Sommet2017_multilevel.pdf
+
+Lyderson, S. Analysis of Longitudinal Data. *Tidsskr Nor Legeforen*. 2022;142:1-4. DOI: <https://doi.org/10.4045/tidsskr.21.0740>
+
+&nbsp; &nbsp; Filename: Lyderson2022_longit.pdf
