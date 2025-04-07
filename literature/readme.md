@@ -4,18 +4,18 @@
 
 String manipulation with stringr Cheatsheet. Posit Software PBC. 2024-05. 
 
-|  Filename: strings.pdf
+  Filename: strings.pdf
 
 ## Week 11
 
 Zhang Z. Reinikainen J, Adeleke KA, Pieterse ME, Groothuis-Oudshoorn CGM. Time-varying covariates and coefficients in Cox regression models. *Ann Transl Med*. 2018;6(7):121-131. DOI: <http://dx.doi.org/10.21037/atm.2018.02.12>
 
-|  Filename: Zhang2018_tvc_Cox.pdf
+  Filename: Zhang2018_tvc_Cox.pdf
 
 Amorim LDAF. Cai J. Modelling recurrent events: a tutorial for analysis in epidemiology. *Int J Epidemiology*. 2015;44(1):324-333. DOI: <http://doi.org/10.1093/ije/dyu222>
 
-|  Filename: (Amorim2015_ModelingTutorial.pdf)
+  Filename: Amorim2015_ModelingTutorial.pdf
 
 Sommet N, Morselli D. Keep Calm and Learn Multilevel Logistic Modeling: A Simplified Three-Step Procedure Using Stata, R, Mplus, and SPSS. *Int Rev Social Psychology*. 2017;30(1):203-218. DOI: <https://doi.org/10.5334/irsp.90>
 
-|  Filename: Sommet2017_multilevel.pdf
+  Filename: Sommet2017_multilevel.pdf
