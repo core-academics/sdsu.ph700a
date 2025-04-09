@@ -1,0 +1,278 @@
+---
+title: |
+  | "PH700A Week 11"
+subtitle: |
+  | Lab Assignment 11
+  | PH 700A, Spring 2025
+author: "FirstName LastName"
+format: html
+editor: source
+---
+
+
+## Data Import and Package Load
+
+```{r}
+#| title: data initialization
+
+library(data.table)
+library(tidyverse)
+
+# Primary Data Import from GitHub
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.vitalsign <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/vitalsign.csv.gz")
+
+df.dx <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/diagnosis.csv.gz")
+
+df.meds <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/medrecon.csv.gz")
+
+df.pyxis <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/pyxis.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+
+df <- df %>% mutate(highpain = case_when(
+  pain == "13" ~ 1,
+  pain == "10" ~ 1,
+  pain == "9" ~ 1,
+  pain == "8" ~ 1,
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(pain_noscore = case_when(
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  pain == "" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(hypotensive = if_else(sbp <100, 1, 0))
+
+df <- df %>% mutate(racewhite = if_else(grepl("WHITE", race), 1, 0))  
+  
+df <- df %>% mutate(lnlos = log(as.numeric(los)))
+
+df.dx <- df.dx %>% mutate(across(icd_title, tolower))
+
+rm(df.triage, df.ed)
+
+# Generating a 3-category disposition variable with Home as the base category
+df <- df %>%
+  mutate(disp3cat = case_when(
+    disposition == "HOME" ~ "HOME",
+    disposition == "ADMITTED" ~ "ADMITTED",
+    .default = "OTHER"
+  ))
+
+df <- df %>%
+  mutate(across(c("disp3cat", "racewhite", "arrival_transport", "gender"), as.factor))
+
+df$disp3cat <- relevel(df$disp3cat, ref = "HOME")
+
+## Generating In-hospital Complications Variable
+df.dx$comp <- NA
+
+df.dx <- df.dx %>%
+  mutate(comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("sepsis", icd_title), 1, comp),
+         comp = if_else(grepl("septic", icd_title), 1, comp),
+         comp = if_else(grepl("adv eff medicinal nos", icd_title), 1, comp),
+         comp = if_else(grepl("post-op", icd_title), 1, comp),
+         comp = if_else(grepl("postop", icd_title), 1, comp),
+         comp = if_else(grepl("complication", icd_title), 1, comp),
+         comp = if_else(grepl("misadv", icd_title), 1, comp),
+         comp = if_else(grepl("urin tract", icd_title), 1, comp),
+         comp = if_else(grepl("following a procedure", icd_title), 1, comp),
+         comp = if_else(grepl("without complications", icd_title), 0, comp)
+  )
+
+comps <- df.dx  %>% filter(comp == 1) %>% distinct(stay_id, comp)
+
+df <- left_join(df, comps, by = "stay_id")
+
+rm(comps)
+
+df <- df %>% mutate(comp = if_else(is.na(comp), 0, comp))
+
+## Capturing Opioid Usage Variable
+df.pyxis <- df.pyxis %>% mutate(across(name, tolower))
+
+df.pyxis <- df.pyxis %>%
+  mutate(opioidtag = case_when(
+    grepl("codeine", name) ~ 1,
+    grepl("fentanyl", name) ~ 1,
+    grepl("duragesic", name) ~ 1,
+    grepl("hydrocodone", name) ~ 1,
+    grepl("vicodin", name) ~ 1,
+    grepl("norco", name) ~ 1,
+    grepl("lortab", name) ~ 1,
+    grepl("hydromorphone", name) ~ 1,
+    grepl("dilaudid", name) ~ 1,
+    grepl("methadone", name) ~ 1,
+    grepl("morphine", name) ~ 1,
+    grepl("oxycodone", name) ~ 1,
+    grepl("oxycontin", name) ~ 1,
+    grepl("roxicodone", name) ~ 1,
+    grepl("oxymorphone", name) ~ 1,
+    grepl("tapentadol", name) ~ 1,
+    grepl("tramadol", name) ~ 1,
+    grepl("ultram", name) ~ 1,
+    grepl("buprenorphine", name) ~ 1,
+    .default = 0
+  ))
+
+opioids <- df.pyxis %>%
+  filter(opioidtag == 1)
+
+# Generating Opioid Usage Ordinal Variable
+opioids <- opioids %>%
+  group_by(stay_id) %>%
+  summarise(opioidsum = sum(opioidtag))
+
+df <- left_join(df, opioids, by = "stay_id")
+df$opioidsum <- ifelse(is.na(df$opioidsum), 0, df$opioidsum)
+
+rm(opioids)
+
+df <- df %>%
+  mutate(opioidlvl = case_when(
+    opioidsum == 0 ~ "None",
+    opioidsum == 1 ~ "Mild",
+    opioidsum == 2 ~ "Moderate",
+    opioidsum >= 3 ~ "Extreme"
+  ))
+df <- df %>%
+  select(-opioidsum) %>%
+  mutate(across(opioidlvl, as.factor))
+
+table(df$opioidlvl)
+df$opioidlvl <- factor(df$opioidlvl, levels = c("None", "Mild", "Moderate", "Extreme"), ordered = TRUE)
+
+df <- df %>%
+  mutate(admitted = if_else(disp3cat == "ADMITTED", 1, 0),
+         ambulance = if_else(arrival_transport == "AMBULANCE", 1, 0))
+
+df$ambulance <- as.factor(df$ambulance)
+df$los <- as.numeric(df$los)
+df$admitted <- as.numeric(df$admitted)
+```
+
+## Data Preparation
+
+A patient-level Poisson analysis of risk factors for incidence of tachycardic events.
+
+The primary outcome is *Tachycardia*, defined as a heart rate exceeding 100 beats per minute.
+
+Each *tachycardic event* is defined as a sustained heart rate exceeding 100 bpm for over 30 seconds.
+
+Unique events are counted if there is an interruption in the *tachycardic event* status over time.
+
+```{r}
+#| label: tachycardia count capture
+
+library(tidyverse)
+library(data.table)
+
+df.vitalsign <- df.vitalsign %>%
+  arrange(stay_id, charttime) %>%
+  mutate(tachycardia = if_else(heartrate > 100 & !is.na(heartrate), 1, 0))
+
+df.tach <- df.vitalsign %>%
+  arrange(stay_id, charttime) %>%
+  group_by(stay_id) %>%
+  mutate(tachy_change = c(0, diff(tachycardia))) %>%
+  mutate(event_start = ifelse(tachycardia == 1 & (tachy_change == 1 | row_number() == 1), 1, 0)) %>%
+  ungroup()
+
+df.tach <- df.tach %>%
+  select(-tachy_change, -tachycardia) %>%
+  rename(tachycardia = event_start)
+
+df.tach.sum <- df.tach %>%
+  select(-subject_id) %>%
+  group_by(stay_id) %>%
+  summarise(t0 = min(as.numeric(charttime), na.rm = TRUE),
+            t1 = max(as.numeric(charttime), na.rm = TRUE),
+            avg_temp = mean(temperature, na.rm = TRUE),
+            avg_rr = mean(resprate, na.rm = TRUE),
+            avg_o2sat = mean(o2sat, na.rm = TRUE),
+            avg_sbp = mean(sbp, na.rm = TRUE),
+            avg_dbp = mean(dbp, na.rm = TRUE),
+            tachycardia = sum(tachycardia, na.rm = TRUE)
+  )
+
+df.tach.sum <- df.tach.sum %>%
+  mutate_all(~ifelse(is.nan(.), NA, .))
+
+df.tach.sum$t0 <- as.POSIXct(df.tach.sum$t0)
+
+df.tach.sum$t1 <- as.POSIXct(df.tach.sum$t1)
+
+df2 <- inner_join(df, df.tach.sum, by = "stay_id")
+
+df2 <- df2 %>%
+  mutate(elapsed = t1-t0) %>%
+  mutate(elapsed = as.numeric(elapsed)) %>%
+  mutate(elapsed = if_else(elapsed == 0, 1, elapsed))
+
+rm(df.tach, df.tach.sum)
+```
+
+The `df2` data frame contains only the patients with at least one record in `df.vitalsign` and was created from an `inner_join` with `df`.
+
+A variable, `elapsed`, is the difference between `t1` and `t0` from the vital signs measurements. This is the total interval of time (in seconds) that vital signs data were collected.
+
+Values of 0 in `elapsed` occur if only one measurement was collected. This was converted to 1 second to resolve issues with logarithmic transformation.
+
+`tachycardia` is a count of total tachycardic events identified from `df.vitalsign`.
+
+Other vital signs measurements (`temperature`, `resprate`, `o2sat`, `sbp`, `dbp`) were averaged over the vital signs time interval.
+
+## Scenario
+
+*Tachycardia* is an intermittent clinical with ranging severity based on the underlying cause. Events may serve as a warning for clinical sequelae including heart failure and mortality for hospitalized patients. Research on singular tachycardic events is mixed owing to the significant heterogenity of causes. However, an analysis of the frequency of tachycardic events per patient may yield important information toward accurate classification of risk.
+
+Please evaluate risk factors for tachycardic event incidence in this data to identify predictors of risk. Consider multiple comparisons if you deem it appropriate.
+
+## Base Model
+```{r}
+#| include: true
+#| label: base model
+library(gtsummary)
+
+tach.m1 <- glm(tachycardia ~ racewhite, family = poisson, offset = log(elapsed), data = df2)
+summary(tach.m1)
+
+tach.m1 %>% tbl_regression(exponentiate = TRUE)
+```
+
+
