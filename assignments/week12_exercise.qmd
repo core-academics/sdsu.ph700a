@@ -1,0 +1,196 @@
+---
+title: |
+  | "PH700A Week 12"
+subtitle: |
+  | Lab Exercise 12 - Ungraded
+  | PH 700A, Spring 2025
+author: "rycalvo"
+format: html
+editor: source
+---
+
+## Introduction
+
+This exercise will not be graded. This file can be used to play around with the various distance options and clustering methods discussed in the lecture.
+
+Data are from the MIMIC-IV database. Only the `edstays` and `triage` tables are used.
+
+## Data Import and Package Load
+```{r}
+#| label: load data
+#| include: true
+
+library(data.table)
+library(tidyverse)
+library(explore)
+
+# Primary Data Import from GitHub
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+
+df <- df %>% mutate(highpain = case_when(
+  pain == "13" ~ 1,
+  pain == "10" ~ 1,
+  pain == "9" ~ 1,
+  pain == "8" ~ 1,
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(pain_noscore = case_when(
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  pain == "" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(hypotensive = if_else(sbp <100, 1, 0))
+
+df <- df %>% mutate(racewhite = if_else(grepl("WHITE", race), 1, 0))  
+  
+df <- df %>% mutate(lnlos = log(as.numeric(los)))
+
+```
+
+## Data Preparation
+
+```{r}
+#| include: true
+#| label: preparing data
+
+library(cluster)
+
+clusterSet <- df %>%
+  select(arrival_transport, lnlos, disposition, temperature, heartrate, resprate, o2sat, sbp, highpain)
+
+clusterSet <- clusterSet %>%
+  mutate(ambulance = if_else(arrival_transport == "AMBULANCE", 1, 0),
+         otherunk = case_when(arrival_transport == "OTHER" ~ 1, arrival_transport == "UNKNOWN" ~ 1, .default = 0),
+         walkin = if_else(arrival_transport == "WALK IN", 1, 0),
+         admitted = if_else(disposition == "ADMITTED", 1, 0),
+         homedisp = if_else(disposition == "HOME", 1, 0),
+         otherdisp = case_when(disposition == "ELOPED" ~ 1, disposition == "LEFT AGAINST MEDICAL ADVICE" ~ 1, disposition == "LEFT WITHOUT BEING SEEN" ~ 1, disposition == "OTHER" ~ 1, disposition == "TRANSFER" ~ 1, .default = 0)
+  )
+
+clusterSet <- clusterSet %>%
+  select(-arrival_transport, -disposition)
+
+catvars <- c("ambulance", "otherunk", "walkin", "admitted", "homedisp", "otherdisp", "highpain")
+
+contvars <- c("lnlos", "temperature", "heartrate", "resprate", "o2sat", "sbp")
+
+clusterSet <- clusterSet %>%
+  mutate(across(all_of(contvars), scale),
+         across(all_of(catvars), as.factor))
+
+clusterSet <- na.omit(clusterSet)
+```
+
+The working data frame is `clusterSet`.
+
+Continuous variables are transformed and z-scored.
+
+Categorical variables are dummied. Total vars = 13.
+
+Observations with any missing values were removed. Current n = 194.
+
+## Distance Calculations
+```{r}
+#| warning: false
+set.seed(20250416)
+
+distances <- daisy(x = clusterSet,
+                  metric = "gower",
+                  type = list(factor = catvars,
+                              numeric = contvars),
+                  stand = FALSE)
+```
+
+## Cluster Analysis and Dendrograph
+```{r}
+#| warning: false
+cluster.out <- hclust(distances, method = "ward.D")
+
+plot(cluster.out, labels = FALSE)
+```
+
+## Selecting The Number of Groups
+
+### Silhouette Plot
+``` {r}
+#| warning: false
+library(factoextra)
+
+silh <- fviz_nbclust(x = clusterSet,
+                     FUNcluster = hcut,
+                     diss = distances,
+                     method = "silhouette",
+                     k.max = 10)
+silh
+```
+
+### WSS Plot
+```{r}
+#| warning: false
+wss <- fviz_nbclust(x = clusterSet,
+                    FUNcluster = hcut,
+                    diss = distances,
+                    method = "wss",
+                    k.max = 10)
+wss
+```
+
+## Merging Groupings Back to Data
+```{r}
+#| label: labeling groups
+#| warning: false
+library(gtsummary)
+
+finalgroups <- cutree(cluster.out, 3)
+
+aggregate(clusterSet, list(finalgroups), mean)
+
+clusterSet <- clusterSet %>%
+  mutate(rownum = row_number())
+
+finalgroups <- as.data.frame(finalgroups)
+
+finalgroups <- finalgroups %>%
+  mutate(rownum = row_number())
+
+clusterID <- full_join(clusterSet, finalgroups, by = "rownum")
+```
+
+## Labeling Clusters
+``` {r}
+clusterID %>% select(-rownum) %>% tbl_summary(by = finalgroups)
+```
