@@ -1,0 +1,65 @@
+---
+title: |
+  | "PH700A Week 14"
+subtitle: |
+  | Lab Exercise 14
+  | PH 700A, Spring 2025
+author: "rycalvo"
+format: html
+editor: source
+---
+
+## Assignment Background
+
+To create, validate, and test a model to accurately predict admission to the hospital based on symptoms and factors collected in the Emergency Room.
+
+_Research Question_: Among patients transported to the emergency department via ambulance, what are the best set of predictors that can be used to determine admission to the hospital.
+
+## Data Loading
+```{r}
+#| label: Data Loading from Github
+#| include: false
+
+library(data.table)
+library(tidyverse)
+library(explore)
+
+df <- fread("https://github.com/core-academics/sdsu.ph700a/raw/main/data/mimic4ed/week14_df.csv.gz")
+
+# Removes the one column from the export
+df$V1 <- NULL
+
+# catvars gender:alzheimer, eval:renaluri, pain_cat
+df <- df %>% mutate_at(vars(-temperature, -heartrate, -resprate, -o2sat, -sbp, -dbp, -edloshrs), as.factor)
+
+# Remove columns that do not vary
+df <- df %>%
+  select_if(~ !all(. == first(.)))
+```
+
+## Subsetting Data
+```{r}
+#| include: true
+#| label: data subsetting
+
+library(rsample)
+
+set.seed(20250430)
+
+var_subselection <- df %>%
+  select(stay_id, gender, disposition, alzheimer, trauma, visual, edloshrs, temperature:acuity, cardiac)
+
+subsets.tagged <- initial_validation_split(var_subselection, prop = c(0.5, 0.25))
+  
+train <- training(subsets.tagged)
+valid <- validation(subsets.tagged)
+test <- testing(subsets.tagged)
+```
+
+The primary outcome is `disposition`. The `stay_id` variable uniquely identifies rows.
+
+## Objective
+
+Please evaluate any combination of predictors using any modeling engine (logistic regression is the default) to identify the best set of predictors.
+
+Please assess calibration and model performance in your code.

@@ -1,0 +1,209 @@
+---
+title: |
+  | "PH700A Week 13"
+subtitle: |
+  | Lab Exercise 13 - Ungraded
+  | PH 700A, Spring 2025
+author: "rycalvo"
+format: html
+editor: source
+---
+
+## Introduction
+
+This exercise will not be graded. This file can be used to play around with the various dimensionality reduction procedures and get accustomed to the output.
+
+Data are from the MIMIC-IV database. Only the `edstays` and `triage` tables are used.
+
+## Data Import and Package Load
+```{r}
+#| label: load data
+
+library(data.table)
+library(tidyverse)
+library(explore)
+
+# Primary Data Import from GitHub
+df.ed <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/edstays.csv.gz")
+
+df.triage <- fread("https://github.com/core-academics/sdsu.ph700a/raw/refs/heads/main/data/mimic4ed/triage.csv.gz")
+
+df.ed <- df.ed %>% mutate(los = outtime-intime)
+
+df.ed <- df.ed %>% mutate(across(c("gender", "race"), as.factor))
+
+df.triage <- df.triage %>% mutate(fever = if_else(temperature >= 100.4, 1, 0))
+
+df.triage <- df.triage %>%
+  mutate(weakness = if_else(
+                            grepl("[Ww]eakness", chiefcomplaint),
+                            1,
+                            0)
+        )
+df.triage <- df.triage %>%
+  mutate(chiefcomplaint = str_replace_all(chiefcomplaint, c("s/p" = "status post", "S/P" = "status post")))
+
+df <- left_join(df.ed, df.triage, by = "stay_id")
+  df$subject_id.y <- NULL
+  df <- df %>% rename(subject_id = subject_id.x)
+
+df <- df %>% mutate(highpain = case_when(
+  pain == "13" ~ 1,
+  pain == "10" ~ 1,
+  pain == "9" ~ 1,
+  pain == "8" ~ 1,
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(pain_noscore = case_when(
+  pain == "Critical" ~ 1,
+  pain == "ett" ~ 1,
+  pain == "o" ~ 1,
+  pain == "UA" ~ 1,
+  pain == "unable" ~ 1,
+  pain == "uta" ~ 1,
+  pain == "" ~ 1,
+  .default = 0
+  ))
+
+df <- df %>% mutate(hypotensive = if_else(sbp <100, 1, 0))
+
+df <- df %>% mutate(racewhite = if_else(grepl("WHITE", race), 1, 0))  
+  
+df <- df %>% mutate(lnlos = log(as.numeric(los)))
+
+```
+
+## PCA Data Preparation
+```{r}
+#| label: Select Variables for Analysis
+
+dfx <- df %>%
+  select(temperature, heartrate, resprate, o2sat, sbp, dbp, fever:lnlos)
+
+dfx <- dfx %>%
+  mutate(across(c("fever", "weakness", "highpain", "pain_noscore", "hypotensive", "racewhite"), as.factor))
+
+dfx <- na.omit(dfx)
+
+columns_to_drop <- dfx %>%
+  summarise_all(n_distinct) %>%
+  as.data.frame()
+
+dfx <- dfx %>%
+  select(-fever)
+
+# rm(columns_to_drop)
+rm(df.ed, df.triage)
+```
+
+Observations with missing values were dropped using `na.omit()`.
+
+`columns_to_drop` was a temporary data frame showing the number of unique values per variable.
+
+Evaluation of `columns_to_drop` showed that `fever` did not vary; This variable was removed.
+
+## Principal Components Analysis
+```{r}
+#| label: tagging cat and cont vars and generating PCs
+
+library(PCAmixdata)
+
+splitVars <- splitmix(dfx)
+
+pcamix <- PCAmix(X.quanti=splitVars$X.quanti, X.quali=splitVars$X.quali, rename.level=TRUE, graph=FALSE, ndim=5)
+
+head(pcamix$scores)
+```
+
+## Evaluate the Eigenvalues
+```{r}
+#| label: evaluate eigenvalues for PCA
+#| include: true
+
+pcamix$eig
+```
+
+## Assess Loadings
+```{r}
+pcamix$sqload
+```
+
+## Component Membership
+```{r}
+plot(pcamix, choice = "cor")
+```
+
+```{r}
+plot(pcamix, choice = "levels")
+```
+
+## FA Data Preparation
+```{r}
+#| label: Continuous Variable Scaling
+#| include: false
+dfy <- dfx %>%
+  mutate(across(where(is.numeric), ~ as.vector(scale(.))))
+  
+dfy <- dfy %>%
+  mutate(across(where(is.factor), ~ recode(.,
+                                          "0" = paste0("No ", cur_column()),
+                                          "1" = paste0("Yes ", cur_column()))))
+```
+
+Data frame originates from the same variable subset used in PCA.
+
+Modifications include:
+
+- Re-labeling the values of the binary variables to hold their variable names.
+
+- Z-scoring all the continuous variables to eliminate residual correlation
+
+## Factor Analysis
+```{r}
+library(FactoMineR)
+library(factoextra)
+famd <- FAMD(dfy, graph = FALSE)
+print(famd)
+```
+
+## Checking Eigenvalues
+```{r}
+eigenvals <- get_eigenvalue(famd)
+head(eigenvals)
+```
+
+## Scree Plot of Dimensions
+```{r}
+fviz_screeplot(famd)
+```
+
+## Assess Variable Membership
+
+To start, this is done for first two dimensions by default.
+
+```{r}
+fviz_famd_var(famd, repel = TRUE)
+```
+
+## Dimension-specific Scree Plots
+```{r}
+fviz_contrib(famd, "var", axes = 1)
+
+fviz_contrib(famd, "var", axes = 2)
+```
+
+## Correlation Circle Graphs
+```{r}
+fviz_famd_var(famd, choice = "quanti.var", repel = TRUE, col.var = "black")
+```
+
+```{r}
+fviz_famd_var(famd, choice = "quali.var", repel = TRUE, col.var = "contrib")
+```
